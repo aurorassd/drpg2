@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Mini Rogue – Adjacent Attack Edition</title>
+  <title>Mini Rogue – Enemy List Edition</title>
 
-  <!-- --- 最小スタイル --- -->
   <style>
     html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,"Noto Sans JP",sans-serif;}
     #ui{
@@ -22,18 +21,26 @@
       touch-action:none;image-rendering:pixelated;
       width:100vmin;height:100vmin;max-width:512px;max-height:512px;
     }
+    #enemyList{
+      max-width:512px;margin:4px auto;padding:4px 8px;font-size:13px;
+      line-height:1.4;background:#222;border-top:1px solid #333;
+    }
+    #enemyList span{display:inline-block;min-width:110px;}
   </style>
 </head>
 <body>
   <!-- UIバー -->
   <div id="ui">
-    <span id="msg">移動：Swipe / ⬆⬇⬅➡　攻撃：Space / ボタン（隣接時のみ命中）</span>
+    <span id="msg">移動：Swipe / ⬆⬇⬅➡　攻撃：Space / ボタン</span>
     <span id="hp"></span>
     <button id="atkBtn">攻撃</button>
   </div>
 
   <!-- ゲーム画面 -->
   <canvas id="gameCanvas" width="320" height="320"></canvas>
+
+  <!-- 敵一覧 -->
+  <div id="enemyList"></div>
 
   <!-- 本体 -->
   <script type="module" src="./game.js"></script>

@@ -1,23 +1,21 @@
 /* -----------------------------------------------------------
- * Mini Rogue – Adjacent Attack Edition
- *   – 攻撃は「上下左右に隣接」している相手にのみ命中
- *   – プレイヤー HP20 / 敵 HP5-12
- *   – 敵ダメージ 1-6 / プレイヤーダメージ 3-6
- *   – 攻撃ボタン & Space キーで攻撃（1ターン消費）
- *   – 画像不要・スマホ対応
+ * Mini Rogue – Enemy List Edition
+ *   – 隣接攻撃＆毎ターン HP 減少バグ修正
+ *   – 倒した敵は即座に消滅（配列から完全除去）
+ *   – 画面下に敵ごとの残り HP を表示
  * --------------------------------------------------------- */
 
-/* ======== 定数 / ユーティリティ ======== */
+/* ======== 基本定数 / ユーティリティ ======== */
 const TILE = 16;
 const W = 20, H = 20;
 const FLOOR = 0, WALL = 1;
-const C = { floor:"#444", wall:"#888", player:"#00e676", enemy:"#ff5252" };
+const COLOR = { floor:"#444", wall:"#888", player:"#00e676", enemy:"#ff5252" };
 
-const R   = n            => Math.floor(Math.random()*n);
-const RNG = (min,max)    => min + R(max-min+1);               // [min,max] 範囲整数
-const ADJ = (ax,ay,bx,by)=> Math.abs(ax-bx)+Math.abs(ay-by)===1; // 隣接判定
+const R   = n => Math.floor(Math.random()*n);
+const RNG = (min,max) => min + R(max-min+1);                          // 整数 [min,max]
+const ADJ = (ax,ay,bx,by) => Math.abs(ax-bx)+Math.abs(ay-by) === 1;   // 上下左右隣接
 
-/* ======== ドットパターン生成（画像不要） ======== */
+/* ======== タイル用ドットパターン ======== */
 function makePattern(color,noise=0){
   const cv=document.createElement("canvas");cv.width=cv.height=TILE;
   const g=cv.getContext("2d");
@@ -49,19 +47,23 @@ function genMap(){
 }
 
 /* ======== エンティティ ======== */
+let ENEMY_SEQ = 1;   // 敵の一意 ID 発行
 class Entity{
   constructor(x,y,col,hp){this.x=x;this.y=y;this.col=col;this.hp=hp;}
   draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);}
 }
 class Player extends Entity{
-  constructor(x,y){super(x,y,C.player,20);}
+  constructor(x,y){super(x,y,COLOR.player,20);}                 // HP 20
 }
 class Enemy extends Entity{
-  constructor(x,y){super(x,y,C.enemy,RNG(5,12));}
+  constructor(x,y){
+    super(x,y,COLOR.enemy,RNG(5,12));                           // HP 5–12
+    this.id = ENEMY_SEQ++;
+  }
   act(game){
     const dx=Math.sign(game.p.x-this.x), dy=Math.sign(game.p.y-this.y);
-    const cand=[[dx,dy],[R(3)-1,R(3)-1]];
-    for(const[mx,my]of cand){
+    const plans=[[dx,dy],[R(3)-1,R(3)-1]];
+    for(const [mx,my] of plans){
       const tx=this.x+mx, ty=this.y+my;
       if(game.isWalkable(tx,ty) && !game.enemyAt(tx,ty) && !(tx===game.p.x&&ty===game.p.y)){
         this.x=tx; this.y=ty; break;
@@ -74,15 +76,15 @@ class Enemy extends Entity{
 class Game{
   constructor(cvs){
     this.cvs=cvs; this.ctx=cvs.getContext("2d");
-    this.patFloor=makePattern(C.floor,16);
-    this.patWall =makePattern(C.wall ,24);
+    this.patFloor=makePattern(COLOR.floor,16);
+    this.patWall =makePattern(COLOR.wall ,24);
 
     this.map=genMap();
     this.p=new Player(...this.randFloor());
     this.en=Array.from({length:5},()=>new Enemy(...this.randFloor()));
 
     this.msg="冒険開始！";
-    this.ui(); this.draw();
+    this.updateUI(); this.draw();
     this.bindInput();
   }
 
@@ -90,9 +92,16 @@ class Game{
   randFloor(){let x,y;do{x=R(W);y=R(H);}while(this.map[y][x]!==FLOOR);return[x,y];}
   isWalkable(x,y){return x>=0&&x<W&&y>=0&&y<H&&this.map[y][x]===FLOOR;}
   enemyAt(x,y){return this.en.find(e=>e.x===x&&e.y===y);}
-  ui(){
+
+  updateUI(){
     document.getElementById("msg").textContent=this.msg;
     document.getElementById("hp").textContent=`HP ${this.p.hp}`;
+    const list=document.getElementById("enemyList");
+    if(this.en.length){
+      list.innerHTML=this.en.map(e=>`<span>敵${e.id}: HP ${e.hp}</span>`).join("");
+    }else{
+      list.textContent="敵は残っていません";
+    }
   }
 
   /* --- 入力 --- */
@@ -102,7 +111,6 @@ class Game{
       if(dir[e.key]){this.turn(...dir[e.key]);e.preventDefault();return;}
       if(e.code==="Space"){this.attack();e.preventDefault();}
     });
-    /* スワイプ */
     let sx,sy;
     this.cvs.addEventListener("touchstart",e=>{const t=e.touches[0];sx=t.clientX;sy=t.clientY;});
     this.cvs.addEventListener("touchend",e=>{
@@ -110,56 +118,52 @@ class Game{
       if(Math.abs(dx)>Math.abs(dy)) this.turn(dx>0?1:-1,0);
       else this.turn(0,dy>0?1:-1);
     });
-    /* 攻撃ボタン */
     document.getElementById("atkBtn").addEventListener("click",()=>this.attack());
   }
 
-  /* --- 移動ターン --- */
+  /* --- プレイヤー移動ターン --- */
   turn(mx,my){
     if(!this.p.hp) return;
     const nx=this.p.x+mx, ny=this.p.y+my;
     const foe=this.enemyAt(nx,ny);
 
-    if(foe){ // 隣接敵へ攻撃（移動しない）
-      this.dealDamageToEnemy(foe);
+    if(foe){                               // 隣接敵へ攻撃
+      this.hitEnemy(foe);
     }else if(this.isWalkable(nx,ny) && !this.enemyAt(nx,ny)){
       this.p.x=nx; this.p.y=ny; this.msg="移動";
-    }else{
-      return; // 壁 or 移動不能ならターン消費なし
-    }
-    this.enemyTurn();
+    }else return;                          // 移動不能→ターン無効
+
+    this.enemyPhase();
     this.endTurn();
   }
 
-  /* --- 攻撃アクション（ボタン/Space） --- */
+  /* --- 攻撃ボタン / Space --- */
   attack(){
     if(!this.p.hp) return;
-    const target=this.en.find(e=>ADJ(e.x,e.y,this.p.x,this.p.y));
-    if(target){
-      this.dealDamageToEnemy(target);
-    }else{
-      this.msg="空振り！"; // 隣接敵ゼロ
-    }
-    this.enemyTurn();            // 1ターン経過
+    const tgt=this.en.find(e=>ADJ(e.x,e.y,this.p.x,this.p.y));
+    if(tgt) this.hitEnemy(tgt); else this.msg="空振り！";
+    this.enemyPhase();
     this.endTurn();
   }
 
-  /* --- 敵へのダメージ計算 --- */
-  dealDamageToEnemy(enemy){
+  hitEnemy(enemy){
     const dmg=RNG(3,6);
     enemy.hp-=dmg;
     this.msg=`攻撃！ -${dmg}`;
     if(enemy.hp<=0){
-      this.en=this.en.filter(e=>e!==enemy);
+      this.en=this.en.filter(e=>e!==enemy);          // ★ 完全消滅
       this.msg="敵を倒した！";
     }
   }
 
-  /* --- 敵ターン --- */
-  enemyTurn(){
+  /* --- 敵行動 & 攻撃 --- */
+  enemyPhase(){
+    /* ★ まず死体を一掃（念のため） */
+    this.en=this.en.filter(e=>e.hp>0);
+
     this.en.forEach(e=>e.act(this));
     this.en.forEach(e=>{
-      if(ADJ(e.x,e.y,this.p.x,this.p.y)){       // 隣接していれば攻撃
+      if(ADJ(e.x,e.y,this.p.x,this.p.y)){
         const dmg=RNG(1,6);
         this.p.hp-=dmg;
         this.msg=`敵の攻撃！ -${dmg}`;
@@ -167,13 +171,14 @@ class Game{
     });
   }
 
-  /* --- ターン終了処理 --- */
+  /* --- ターン終了 --- */
   endTurn(){
     if(this.p.hp<=0){
       this.msg="Game Over";
       this.cvs.style.filter="grayscale(1)";
     }
-    this.ui(); this.draw();
+    this.updateUI();
+    this.draw();
   }
 
   /* --- 描画 --- */
