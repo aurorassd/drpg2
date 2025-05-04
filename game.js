@@ -1,21 +1,33 @@
 /* -----------------------------------------------------------
- * Mini Rogue – v0.5
- *   - ターン順: プレイヤー 1 行動 → 敵 1 行動
- *   - 敵は「開始時に隣接していれば攻撃」 / そうでなければ移動のみ
- *   - 各行動をログに記録
+ * Mini Rogue – v0.6
+ * 追加機能
+ *   ◇ 回復アイテム (3 個)  … 踏むと HP +10 (上限 20)
+ *   ◇ 攻撃力 UP   (2 個)  … 踏むと攻撃力 +3 (累積)
+ * 仕様変更
+ *   ◇ プレイヤー・敵とも攻撃時 15 % でミス（ダメージ 0）
+ *   ◇ すべての行動をログへ
  * --------------------------------------------------------- */
 
-/* ======== 基本定数 / ユーティリティ ======== */
+/* ========= 基本定数・ユーティリティ ========= */
 const TILE = 16;
 const W = 20, H = 20;
-const FLOOR = 0, WALL = 1;
-const COLOR = { floor:"#444", wall:"#888", player:"#00e676", enemy:"#ff5252" };
+const FLOOR = 0, WALL  = 1;
 
-const R   = n => Math.floor(Math.random()*n);
-const RNG = (min,max)=> min + R(max-min+1);                        // [min,max]
-const ADJ = (ax,ay,bx,by)=> Math.abs(ax-bx)+Math.abs(ay-by)===1;   // 上下左右隣接
+const COLOR = {
+  floor  : "#444",
+  wall   : "#888",
+  player : "#00e676",
+  enemy  : "#ff5252",
+  heal   : "#00bcd4",    // 回復アイテム
+  power  : "#ffc107"     // 攻撃力+3
+};
 
-/* ======== タイルパターン ======== */
+const MISS_RATE = 0.15;               // 15 %
+const R   = n         => Math.floor(Math.random()*n);
+const RNG = (a,b)     => a + R(b-a+1);               // [a,b]
+const ADJ = (ax,ay,bx,by)=>Math.abs(ax-bx)+Math.abs(ay-by)===1;
+
+/* ========= ドットパターン生成 ========= */
 function pattern(color,noise=0){
   const cv=document.createElement("canvas");cv.width=cv.height=TILE;
   const g=cv.getContext("2d");
@@ -31,7 +43,7 @@ function pattern(color,noise=0){
   return g.createPattern(cv,"repeat");
 }
 
-/* ======== マップ生成 ======== */
+/* ========= マップ生成 ========= */
 function genMap(){
   const m=Array.from({length:H},()=>Array(W).fill(WALL));
   let x=R(W),y=R(H);m[y][x]=FLOOR;
@@ -46,26 +58,34 @@ function genMap(){
   return m;
 }
 
-/* ======== エンティティ ======== */
+/* ========= エンティティ ========= */
 let ENEMY_SEQ=1;
 class Entity{
   constructor(x,y,col,hp){this.x=x;this.y=y;this.col=col;this.hp=hp;}
   draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);}
 }
-class Player extends Entity{constructor(x,y){super(x,y,COLOR.player,20);} }
-class Enemy  extends Entity{
+class Player extends Entity{
+  constructor(x,y){super(x,y,COLOR.player,20);this.atkBonus=0;}
+}
+class Enemy extends Entity{
   constructor(x,y){super(x,y,COLOR.enemy,RNG(5,12));this.id=ENEMY_SEQ++;}
-  /** true=攻撃した / false=そうでない  */
+  /** 1ターン行動 */
   act(game){
-    /* 1) 隣接していたら攻撃して終わり */
+    // 1) 隣接していれば攻撃だけ
     if(ADJ(this.x,this.y,game.p.x,game.p.y)){
-      const dmg=RNG(1,6);
-      game.p.hp-=dmg;
-      game.log(`敵${this.id} の攻撃！ -${dmg}`);
-      game.msg=`敵の攻撃！ -${dmg}`;
-      return true;
+      const miss=Math.random()<MISS_RATE;
+      if(miss){
+        game.log(`敵${this.id} の攻撃は外れた`);
+        game.msg="敵の攻撃はミス！";
+      }else{
+        const dmg=RNG(1,6);
+        game.p.hp-=dmg;
+        game.log(`敵${this.id} の攻撃！ -${dmg}`);
+        game.msg=`敵の攻撃！ -${dmg}`;
+      }
+      return;
     }
-    /* 2) 隣接していなければ移動のみ（攻撃なし） */
+    // 2) 移動だけ
     const dx=Math.sign(game.p.x-this.x), dy=Math.sign(game.p.y-this.y);
     const plans=[[dx,dy],[R(3)-1,R(3)-1]];
     for(const [mx,my] of plans){
@@ -73,14 +93,24 @@ class Enemy  extends Entity{
       if(game.walkable(tx,ty) && !game.enemyAt(tx,ty) && !(tx===game.p.x&&ty===game.p.y)){
         this.x=tx; this.y=ty;
         game.log(`敵${this.id} が移動`);
-        return false;
+        return;
       }
     }
-    return false; // 何もできなかった
+    // 動けず何もしない
+    game.log(`敵${this.id} は足踏みした`);
   }
 }
 
-/* ======== メインゲーム ======== */
+/* ========= アイテム ========= */
+class Item{
+  constructor(x,y,type){
+    this.x=x;this.y=y;this.type=type;               // type: "heal" | "power"
+    this.col=COLOR[type];
+  }
+  draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);}
+}
+
+/* ========= メインゲーム ========= */
 class Game{
   constructor(cvs){
     this.cvs=cvs; this.ctx=cvs.getContext("2d");
@@ -90,6 +120,9 @@ class Game{
     this.map=genMap();
     this.p=new Player(...this.randFloor());
     this.en=Array.from({length:5},()=>new Enemy(...this.randFloor()));
+    this.items=[];
+    this.placeItems("heal",3);
+    this.placeItems("power",2);
 
     this.logs=[];
     this.msg="冒険開始！";
@@ -97,27 +130,38 @@ class Game{
     this.bindInput();
   }
 
-  /* --- 補助 --- */
+  /* ---- 補助 ---- */
   randFloor(){let x,y;do{x=R(W);y=R(H);}while(this.map[y][x]!==FLOOR);return[x,y];}
   walkable(x,y){return x>=0&&x<W&&y>=0&&y<H&&this.map[y][x]===FLOOR;}
   enemyAt(x,y){return this.en.find(e=>e.x===x&&e.y===y);}
-  log(text){
-    this.logs.push(text);
+  itemIndexAt(x,y){return this.items.findIndex(it=>it.x===x&&it.y===y);}
+  log(t){
+    this.logs.push(t);
     const logDiv=document.getElementById("log");
-    logDiv.innerHTML=this.logs.slice(-50).join("<br>");      // 直近 50 行を表示
+    logDiv.innerHTML=this.logs.slice(-60).join("<br>");
     logDiv.scrollTop=logDiv.scrollHeight;
   }
-
   updateUI(){
     document.getElementById("msg").textContent=this.msg;
-    document.getElementById("hp").textContent=`HP ${this.p.hp}`;
+    document.getElementById("hp").textContent=`HP ${this.p.hp}  (攻撃+${this.p.atkBonus})`;
     const list=document.getElementById("enemyList");
     list.innerHTML=this.en.length
       ? this.en.map(e=>`<span>敵${e.id}: HP ${e.hp}</span>`).join("")
       : "敵は残っていません";
   }
 
-  /* --- 入力 --- */
+  /* ---- アイテム配置 ---- */
+  placeItems(type,count){
+    while(count--){
+      let x,y;
+      do{
+        [x,y]=this.randFloor();
+      }while(this.enemyAt(x,y) || (x===this.p.x&&y===this.p.y) || this.itemIndexAt(x,y)!==-1);
+      this.items.push(new Item(x,y,type));
+    }
+  }
+
+  /* ---- 入力 ---- */
   bindInput(){
     const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
     addEventListener("keydown",e=>{
@@ -134,26 +178,25 @@ class Game{
     document.getElementById("atkBtn").addEventListener("click",()=>this.turnAttack());
   }
 
-  /* ===== ターン処理 ===== */
-
-  /** プレイヤー移動 */
+  /* ========= ターン処理 ========= */
   turnMove(mx,my){
     if(!this.p.hp) return;
     const nx=this.p.x+mx, ny=this.p.y+my;
     const foe=this.enemyAt(nx,ny);
 
     if(foe){
-      this.hitEnemy(foe);                          // 攻撃で 1 行動消費
+      this.hitEnemy(foe);                            // 攻撃で行動消費
     }else if(this.walkable(nx,ny) && !foe){
       this.p.x=nx; this.p.y=ny;
       this.msg="移動";
       this.log("プレイヤーが移動");
-    }else return;                                  // 行動無効
-
-    this.enemyTurn();                              // 敵ターンへ
+      this.checkItem();
+    }else{
+      return;                                       // 行動無効
+    }
+    this.enemyTurn();
   }
 
-  /** プレイヤー攻撃ボタン/Space */
   turnAttack(){
     if(!this.p.hp) return;
     const tgt=this.en.find(e=>ADJ(e.x,e.y,this.p.x,this.p.y));
@@ -163,11 +206,16 @@ class Game{
   }
 
   hitEnemy(enemy){
-    const dmg=RNG(3,6);
+    const miss=Math.random()<MISS_RATE;
+    if(miss){
+      this.msg="攻撃ミス！";
+      this.log("プレイヤーの攻撃は外れた");
+      return;
+    }
+    const dmg=RNG(3,6)+this.p.atkBonus;
     enemy.hp-=dmg;
     this.msg=`攻撃！ -${dmg}`;
     this.log(`プレイヤーが敵${enemy.id} に ${dmg} ダメージ`);
-
     if(enemy.hp<=0){
       this.en=this.en.filter(e=>e!==enemy);
       this.msg="敵を倒した！";
@@ -175,10 +223,29 @@ class Game{
     }
   }
 
-  /** === 敵ターン === */
+  /* ---- アイテム取得 ---- */
+  checkItem(){
+    const idx=this.itemIndexAt(this.p.x,this.p.y);
+    if(idx===-1) return;
+    const it=this.items[idx];
+    if(it.type==="heal"){
+      const before=this.p.hp;
+      this.p.hp=Math.min(this.p.hp+10,20);
+      const diff=this.p.hp-before;
+      this.msg=`回復 +${diff}`;
+      this.log(`回復アイテムを取得 (+${diff})`);
+    }else if(it.type==="power"){
+      this.p.atkBonus+=3;
+      this.msg="攻撃力 +3";
+      this.log("攻撃力UPアイテムを取得 (+3)");
+    }
+    this.items.splice(idx,1);
+  }
+
+  /* ---- 敵ターン ---- */
   enemyTurn(){
-    this.en=this.en.filter(e=>e.hp>0);             // 念のため死体除去
-    for(const e of this.en) e.act(this);           // 各敵 1 行動
+    this.en=this.en.filter(e=>e.hp>0);
+    for(const e of this.en) e.act(this);
     this.endTurn();
   }
 
@@ -191,20 +258,24 @@ class Game{
     this.updateUI(); this.draw();
   }
 
-  /* --- 描画 --- */
+  /* ========= 描画 ========= */
   draw(){
     const g=this.ctx;
     g.clearRect(0,0,this.cvs.width,this.cvs.height);
+    // マップ
     for(let y=0;y<H;y++)for(let x=0;x<W;x++){
       g.fillStyle=this.map[y][x]===FLOOR?this.patFloor:this.patWall;
       g.fillRect(x*TILE,y*TILE,TILE,TILE);
     }
+    // アイテム
+    this.items.forEach(it=>it.draw(g));
+    // エンティティ
     this.en.forEach(e=>e.draw(g));
     this.p.draw(g);
   }
 }
 
-/* ======== 起動 ======== */
+/* ========= 起動 ========= */
 window.addEventListener("load",()=>{
   const cvs=document.getElementById("gameCanvas");
   const dpr=window.devicePixelRatio||1;
