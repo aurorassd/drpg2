@@ -3,38 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Mini Rogue v0.8</title>
+  <title>Mini Rogue v0.8.1</title>
 
   <style>
     html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,"Noto Sans JP",sans-serif;}
-    /* ─── 上部バー ─── */
-    #ui{
-      position:fixed;inset:0 0 auto 0;height:46px;display:flex;align-items:center;justify-content:space-between;
-      padding:0 10px;box-sizing:border-box;background:#222;font-size:14px;z-index:1;
-    }
+    #ui{position:fixed;inset:0 0 auto 0;height:46px;display:flex;align-items:center;justify-content:space-between;
+        padding:0 10px;box-sizing:border-box;background:#222;font-size:14px;z-index:1;}
     #atkBtn{padding:4px 12px;font-size:14px;background:#444;color:#fff;border:1px solid #666;border-radius:4px;min-width:80px;}
-    /* ─── ゲーム画面 ─── */
-    #gameCanvas{
-      display:block;margin:46px auto 0;background:#000;touch-action:none;image-rendering:pixelated;
-      width:100vmin;height:100vmin;max-width:512px;max-height:512px;
-    }
-    /* ─── 情報パネル ─── */
-    #enemyList,#elog,#plog{
-      max-width:512px;margin:4px auto;padding:4px 8px;font-size:13px;line-height:1.4;
-      background:#222;border-top:1px solid #333;
-    }
+
+    #gameCanvas{display:block;margin:46px auto 0;background:#000;touch-action:none;image-rendering:pixelated;
+                width:100vmin;height:100vmin;max-width:512px;max-height:512px;}
+
+    #enemyList,#elog,#plog{max-width:512px;margin:4px auto;padding:4px 8px;font-size:13px;line-height:1.4;
+                           background:#222;border-top:1px solid #333;}
     #enemyList span{display:inline-block;min-width:110px;}
     #elog,#plog{height:110px;overflow-y:auto;border-top:none;}
     #elog{border-bottom:1px solid #333;}
-    /* ─── ログ色 ─── */
-    .n {color:#ddd;}      /* 通常 */
-    .ed{color:#ff0;}      /* 敵へのDMG */
-    .pd{color:#f66;}      /* プレイヤーDMG */
-    .heal{color:#0f0;}    /* 回復 */
-    .stat{color:#ffa500;} /* ステータス変化 */
-    /* ─── 致命的エラー表示 ─── */
-    #fatal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);color:#f66;
-      font-size:14px;padding:20px;box-sizing:border-box;overflow:auto;white-space:pre-wrap;z-index:9999;}
+
+    /* ─ ログ色 ─ */
+    .n   {color:#ddd;}
+    .ed  {color:#ff0;}
+    .pd  {color:#f66;}
+    .heal{color:#0f0;}
+    .stat{color:#ffa500;}
+
+    /* ─ 致命的エラー表示 ─ */
+    #fatal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);color:#f66;font-size:14px;
+           padding:20px;box-sizing:border-box;overflow:auto;white-space:pre-wrap;z-index:9999;}
   </style>
 </head>
 <body>
