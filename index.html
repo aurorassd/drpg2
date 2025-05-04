@@ -3,40 +3,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Mini Rogue v0.7.1</title>
+  <title>Mini Rogue v0.8</title>
 
   <style>
-    /* 既存スタイルは v0.7 と同じ。省略せず全文です */
     html,body{margin:0;height:100%;background:#111;color:#eee;font-family:system-ui,"Noto Sans JP",sans-serif;}
+    /* ─── 上部バー ─── */
     #ui{
-      position:fixed;top:0;left:0;right:0;height:46px;
-      display:flex;align-items:center;justify-content:space-between;
-      padding:0 10px;box-sizing:border-box;background:#222;font-size:14px;
+      position:fixed;inset:0 0 auto 0;height:46px;display:flex;align-items:center;justify-content:space-between;
+      padding:0 10px;box-sizing:border-box;background:#222;font-size:14px;z-index:1;
     }
     #atkBtn{padding:4px 12px;font-size:14px;background:#444;color:#fff;border:1px solid #666;border-radius:4px;min-width:80px;}
+    /* ─── ゲーム画面 ─── */
     #gameCanvas{
-      display:block;margin:46px auto 0;background:#000;
-      touch-action:none;image-rendering:pixelated;
+      display:block;margin:46px auto 0;background:#000;touch-action:none;image-rendering:pixelated;
       width:100vmin;height:100vmin;max-width:512px;max-height:512px;
     }
-    #enemyList,#plog,#elog{
-      max-width:512px;margin:4px auto;padding:4px 8px;font-size:13px;
-      line-height:1.4;background:#222;border-top:1px solid #333;
+    /* ─── 情報パネル ─── */
+    #enemyList,#elog,#plog{
+      max-width:512px;margin:4px auto;padding:4px 8px;font-size:13px;line-height:1.4;
+      background:#222;border-top:1px solid #333;
     }
     #enemyList span{display:inline-block;min-width:110px;}
-    #elog{height:100px;overflow-y:auto;border-top:none;border-bottom:1px solid #333;}
-    #plog{height:100px;overflow-y:auto;border-top:none;}
-    /* エラーメッセージを全面に表示するための簡易オーバーレイ */
-    #fatal{
-      display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);color:#f66;
-      font-size:14px;padding:20px;box-sizing:border-box;overflow:auto;z-index:9999;
-      white-space:pre-wrap;
-    }
+    #elog,#plog{height:110px;overflow-y:auto;border-top:none;}
+    #elog{border-bottom:1px solid #333;}
+    /* ─── ログ色 ─── */
+    .n {color:#ddd;}      /* 通常 */
+    .ed{color:#ff0;}      /* 敵へのDMG */
+    .pd{color:#f66;}      /* プレイヤーDMG */
+    .heal{color:#0f0;}    /* 回復 */
+    .stat{color:#ffa500;} /* ステータス変化 */
+    /* ─── 致命的エラー表示 ─── */
+    #fatal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);color:#f66;
+      font-size:14px;padding:20px;box-sizing:border-box;overflow:auto;white-space:pre-wrap;z-index:9999;}
   </style>
 </head>
 <body>
   <div id="ui">
-    <span id="msg">移動：Swipe / ⬆⬇⬅➡　攻撃：Space / ボタン</span>
+    <span id="msg">Swipe/矢印で移動　Space/ボタンで攻撃</span>
     <span id="stats"></span>
     <button id="atkBtn">攻撃</button>
   </div>
@@ -47,7 +50,6 @@
   <div id="elog"></div>
   <div id="plog"></div>
 
-  <!-- ★ 致命的エラー表示オーバーレイ -->
   <div id="fatal"></div>
 
   <script type="module" src="./game.js"></script>

@@ -1,46 +1,53 @@
-/* -----------------------------------------------------------
- * Mini Rogue – v0.7.1
- * - v0.7 の構文ミス修正 (stats 表示式)
- * - グローバルエラーハンドリング: 画面 & コンソールに詳細表示
- * --------------------------------------------------------- */
+/* ------------------------------------------------------------
+ * Mini Rogue  v0.8
+ *  新機能
+ *   • 敵タイプ追加
+ *       - 双撃兵 (2 回攻撃)
+ *       - 疾走兵 (1 ターン 2 マス移動)
+ *   • クリティカル 15 %（ダメージ 2 倍）
+ *   • ダッシュアイテム 2 個：取得次ターンのみ 2 マス移動
+ *   • 丁寧な日本語ログ + 色分け
+ *  既存
+ *   • ミス 15 %／回復・攻撃アップ・壁密度↑／二分ログ／ターン表示
+ * ----------------------------------------------------------- */
 
-/* ========= エラーハンドリング ========= */
-function showFatal(err){
+/* ── フェイルセーフ ── */
+function fatal(err){
   console.error(err);
-  const div=document.getElementById("fatal");
-  div.textContent=`⚠️  FATAL ERROR  ⚠️\n\n${err.message || err}\n\n詳細はコンソール (F12) をご確認ください。`;
-  div.style.display="block";
+  const d=document.getElementById('fatal');
+  d.textContent=`⚠️  致命的エラー\n\n${err.message||err}\n\n詳細はコンソールをご覧ください。`;
+  d.style.display='block';
 }
-window.addEventListener("error", e=>showFatal(e.error||e.message));
-window.addEventListener("unhandledrejection", e=>showFatal(e.reason));
+window.addEventListener('error',e=>fatal(e.error||e.message));
+window.addEventListener('unhandledrejection',e=>fatal(e.reason));
 
-/* ========= 以降は v0.7 本体 ＋ バグ修正 ========= */
-const TILE=16, W=20, H=20, FLOOR=0, WALL=1;
+/* ── 定数 & ユーティリティ ── */
+const TILE=16,W=20,H=20,FLOOR=0,WALL=1;
 const COLOR={
-  floor:"#444", wall:"#666",
-  player:"#00e676", enemy:"#ff5252",
-  heal:"#00bcd4", power:"#ffc107"
+  floor:'#444',wall:'#666',player:'#00e676',enemy:'#ff5252',
+  heal:'#00bcd4',power:'#ffc107',dash:'#ff80ff'
 };
-const MISS_RATE=0.15;
+const MISS=0.15,CRIT=0.15;
+
 const R=n=>Math.floor(Math.random()*n);
 const RNG=(a,b)=>a+R(b-a+1);
 const ADJ=(ax,ay,bx,by)=>Math.abs(ax-bx)+Math.abs(ay-by)===1;
 
-/* ドットパターン */
-function pat(color,noise=0){
-  const cv=document.createElement("canvas");cv.width=cv.height=TILE;
-  const g=cv.getContext("2d");g.fillStyle=color;g.fillRect(0,0,TILE,TILE);
+function pattern(col,noise=0){
+  const c=document.createElement('canvas');c.width=c.height=TILE;
+  const g=c.getContext('2d');g.fillStyle=col;g.fillRect(0,0,TILE,TILE);
   if(noise){
     const d=g.getImageData(0,0,TILE,TILE);
     for(let i=0;i<d.data.length;i+=4){
       const v=(Math.random()*noise)|0;
       d.data[i]+=v;d.data[i+1]+=v;d.data[i+2]+=v;
     }g.putImageData(d,0,0);
-  }return g.createPattern(cv,"repeat");
+  }
+  return g.createPattern(c,'repeat');
 }
 
-/* マップ生成（壁多め） */
-function genMap(){
+/* ── マップ（壁多め） ── */
+function makeMap(){
   const m=Array.from({length:H},()=>Array(W).fill(WALL));
   let x=R(W),y=R(H);m[y][x]=FLOOR;
   for(let i=0;i<W*H*3;i++){
@@ -54,153 +61,300 @@ function genMap(){
   return m;
 }
 
-/* --- エンティティ --- */
-let ENEMY_SEQ=1;
-class Entity{constructor(x,y,c,h){this.x=x;this.y=y;this.col=c;this.hp=h;}
-  draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);} }
-class Player extends Entity{constructor(x,y){super(x,y,COLOR.player,20);this.atkBonus=0;}}
-class Enemy  extends Entity{
-  constructor(x,y){super(x,y,COLOR.enemy,RNG(5,12));this.id=ENEMY_SEQ++;}
-  act(gm){
-    if(ADJ(this.x,this.y,gm.p.x,gm.p.y)){
-      if(Math.random()<MISS_RATE){gm.elog(`敵${this.id} の攻撃は外れた`);return;}
-      const dmg=RNG(1,6);gm.p.hp-=dmg;gm.elog(`敵${this.id} の攻撃！ -${dmg}`);return;
-    }
-    const dx=Math.sign(gm.p.x-this.x),dy=Math.sign(gm.p.y-this.y);
-    const cand=[[dx,dy],[R(3)-1,R(3)-1]];
-    for(const[ mx,my]of cand){
-      const tx=this.x+mx,ty=this.y+my;
-      if(gm.walk(tx,ty)&&!gm.enemyAt(tx,ty)&&(tx!==gm.p.x||ty!==gm.p.y)){
-        this.x=tx;this.y=ty;gm.elog(`敵${this.id} が移動`);return;
+/* ── 基底エンティティ ── */
+let ENEMY_ID=1;
+class Entity{constructor(x,y,col,hp){this.x=x;this.y=y;this.col=col;this.hp=hp;}
+  draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);}}
+
+/* ── プレイヤー ── */
+class Player extends Entity{
+  constructor(x,y){super(x,y,COLOR.player,20);this.atkBonus=0;this.dash=0;}
+}
+
+/* ── 敵 ── */
+class Enemy extends Entity{
+  constructor(x,y,hp=RNG(5,12)){super(x,y,COLOR.enemy,hp);this.id=ENEMY_ID++;}
+  /* 1 行動（移動 or 攻撃） */
+  act(game){                                         // デフォルト敵
+    if(this.tryAttack(game)) return;
+    this.stepToward(game,1);
+  }
+  dirToPlayer(game){
+    return [Math.sign(game.p.x-this.x),Math.sign(game.p.y-this.y)];
+  }
+  tryAttack(game,repeats=1){
+    if(!ADJ(this.x,this.y,game.p.x,game.p.y))return false;
+    for(let i=0;i<repeats;i++){
+      if(Math.random()<MISS){
+        game.elog(`敵${this.id}の攻撃は外れました。`,'n');
+      }else{
+        let dmg=RNG(1,6);
+        const crit=Math.random()<CRIT;
+        if(crit) dmg*=2;
+        game.p.hp-=dmg;
+        game.elog(`敵${this.id}は${dmg}のダメージを与えました。${crit?'(クリティカル)': ''}`,'pd');
       }
     }
-    gm.elog(`敵${this.id} は足踏みした`);
+    return true;
+  }
+  stepToward(game,steps){
+    for(let s=0;s<steps;s++){
+      const [dx,dy]=this.dirToPlayer(game);
+      const plans=[[dx,dy],[R(3)-1,R(3)-1]];
+      let moved=false;
+      for(const[ mx,my]of plans){
+        const tx=this.x+mx,ty=this.y+my;
+        if(game.walk(tx,ty)&&!game.enemyAt(tx,ty)&&(tx!==game.p.x||ty!==game.p.y)){
+          this.x=tx;this.y=ty;
+          moved=true;
+          break;
+        }
+      }
+      if(!moved) break;
+    }
+    game.elog(`敵${this.id}は移動しました。`,'n');
   }
 }
 
-/* --- アイテム --- */
-class Item{constructor(x,y,t){this.x=x;this.y=y;this.type=t;this.col=COLOR[t];}
-  draw(g){g.fillStyle=this.col;g.fillRect(this.x*TILE,this.y*TILE,TILE,TILE);} }
+/* ── 双撃兵：2 回攻撃 ── */
+class DoubleAttackEnemy extends Enemy{
+  constructor(x,y){super(x,y);this.col='#ff8c52';}
+  act(game){
+    if(this.tryAttack(game,2)) return;
+    this.stepToward(game,1);
+  }
+}
 
-/* --- メインゲーム --- */
+/* ── 疾走兵：2 マス移動 ── */
+class FastEnemy extends Enemy{
+  constructor(x,y){super(x,y);this.col='#52a0ff';}
+  act(game){
+    if(this.tryAttack(game)) return;      // 隣接してたら通常攻撃 1 回
+    this.stepToward(game,2);              // 2 ステップ移動
+  }
+}
+
+/* ── アイテム ── */
+class Item extends Entity{
+  constructor(x,y,type){
+    const col=COLOR[type];super(x,y,col,1);this.type=type;
+  }
+}
+
+/* ── ゲーム本体 ── */
 class Game{
   constructor(cv){
-    this.cvs=cv;this.ctx=cv.getContext("2d");
-    this.patFloor=pat(COLOR.floor,16);this.patWall=pat(COLOR.wall,24);
-    this.map=genMap();this.turn=1;
+    this.cv=cv;this.ctx=cv.getContext('2d');
+    this.patFloor=pattern(COLOR.floor,16);this.patWall=pattern(COLOR.wall,24);
+    this.map=makeMap();this.turn=1;
 
     this.p=new Player(...this.randFloor());
-    this.en=Array.from({length:5},()=>new Enemy(...this.randFloor()));
-    this.items=[];this.addItems("heal",3);this.addItems("power",2);
+    this.en=this.spawnEnemies(5);
+    this.items=[];
+    this.placeItems('heal',3);
+    this.placeItems('power',2);
+    this.placeItems('dash',2);
 
-    this.msg="冒険開始！";
-    this.render();this.bindInput();
+    this.msg='冒険開始！';
+    this.draw();this.ui();
+    this.bindInput();
   }
 
-  randFloor(){let x,y;do{ x=R(W);y=R(H);}while(this.map[y][x]!==FLOOR);return[x,y];}
+  /* ─── 便利 ─── */
+  randFloor(){let x,y;do{x=R(W);y=R(H);}while(this.map[y][x]!==FLOOR);return[x,y];}
   walk(x,y){return x>=0&&x<W&&y>=0&&y<H&&this.map[y][x]===FLOOR;}
   enemyAt(x,y){return this.en.find(e=>e.x===x&&e.y===y);}
   itemIdx(x,y){return this.items.findIndex(i=>i.x===x&&i.y===y);}
+  /* ─── ログ ─── */
+  addLog(divId,text,cls='n'){
+    const d=document.getElementById(divId);
+    d.innerHTML+=`<span class="${cls}">${text}</span><br>`;
+    d.scrollTop=d.scrollHeight;
+  }
+  elog(txt,cls){this.addLog('elog',txt,cls);}
+  plog(txt,cls){this.addLog('plog',txt,cls);}
 
-  elog(t){const d=document.getElementById("elog");d.innerHTML+=t+"<br>";d.scrollTop=d.scrollHeight;}
-  plog(t){const d=document.getElementById("plog");d.innerHTML+=t+"<br>";d.scrollTop=d.scrollHeight;}
-
+  /* ─── UI ─── */
   ui(){
-    const atkMin=this.p.atkBonus+3, atkMax=this.p.atkBonus+6;
-    document.getElementById("msg").textContent=this.msg;
-    document.getElementById("stats").textContent=`HP ${this.p.hp}  ATK ${atkMin}-${atkMax}  Turn ${this.turn}`;
-    const list=document.getElementById("enemyList");
-    list.innerHTML=this.en.length?this.en.map(e=>`<span>敵${e.id}: HP ${e.hp}</span>`).join(""):"敵は残っていません";
+    const atkMin=this.p.atkBonus+3,atkMax=this.p.atkBonus+6;
+    const dashTxt=this.p.dash?'(ダッシュ準備)':'';
+    document.getElementById('msg').textContent=this.msg;
+    document.getElementById('stats').textContent=
+      `HP ${this.p.hp}  ATK ${atkMin}-${atkMax}  Turn ${this.turn} ${dashTxt}`;
+    const list=document.getElementById('enemyList');
+    list.innerHTML=this.en.length
+      ? this.en.map(e=>`<span>敵${e.id}: HP ${e.hp}</span>`).join('')
+      : '敵は残っていません';
   }
 
-  addItems(type,n){
+  /* ─── 敵生成 ─── */
+  spawnEnemies(n){
+    const arr=[];
+    while(arr.length<n){
+      const [x,y]=this.randFloor();
+      const r=Math.random();
+      let e;
+      if(r<0.33) e=new DoubleAttackEnemy(x,y);
+      else if(r<0.66) e=new FastEnemy(x,y);
+      else e=new Enemy(x,y);
+      if(!((x===this.p.x&&y===this.p.y)||arr.some(o=>o.x===x&&o.y===y)))
+        arr.push(e);
+    }
+    return arr;
+  }
+
+  /* ─── アイテム配置 ─── */
+  placeItems(type,n){
     while(n--){
-      let x,y;do{[x,y]=this.randFloor();}while(
-        this.enemyAt(x,y)||(x===this.p.x&&y===this.p.y)||this.itemIdx(x,y)!==-1
-      );this.items.push(new Item(x,y,type));
+      let x,y;
+      do{ [x,y]=this.randFloor(); }
+      while(this.enemyAt(x,y)||(x===this.p.x&&y===this.p.y)||this.itemIdx(x,y)!==-1);
+      this.items.push(new Item(x,y,type));
     }
   }
 
+  /* ─── 入力 ─── */
   bindInput(){
-    const dir={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0]};
-    addEventListener("keydown",e=>{
+    const dir={ArrowUp:[0,-1,'北'],ArrowDown:[0,1,'南'],ArrowLeft:[-1,0,'西'],ArrowRight:[1,0,'東']};
+    window.addEventListener('keydown',e=>{
       try{
-        if(dir[e.key]){this.moveTurn(...dir[e.key]);e.preventDefault();return;}
-        if(e.code==="Space"){this.attackTurn();e.preventDefault();}
-      }catch(err){showFatal(err);}
+        if(dir[e.key]){const [dx,dy,dirName]=dir[e.key];this.moveTurn(dx,dy,dirName);e.preventDefault();}
+        else if(e.code==='Space'){this.attackTurn();e.preventDefault();}
+      }catch(err){fatal(err);}
     });
     let sx,sy;
-    this.cvs.addEventListener("touchstart",e=>{const t=e.touches[0];sx=t.clientX;sy=t.clientY;});
-    this.cvs.addEventListener("touchend",e=>{
-      try{
-        const t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
-        Math.abs(dx)>Math.abs(dy)?this.moveTurn(dx>0?1:-1,0):this.moveTurn(0,dy>0?1:-1);
-      }catch(err){showFatal(err);}
+    this.cv.addEventListener('touchstart',e=>{const t=e.touches[0];sx=t.clientX;sy=t.clientY;});
+    this.cv.addEventListener('touchend',e=>{
+      const t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
+      const hori=Math.abs(dx)>Math.abs(dy);
+      const [mx,my,dirName]=hori
+        ?[dx>0?1:-1,0,dx>0?'東':'西']
+        :[0,dy>0?1:-1,dy>0?'南':'北'];
+      try{this.moveTurn(mx,my,dirName);}catch(err){fatal(err);}
     });
-    document.getElementById("atkBtn").addEventListener("click",()=>{try{this.attackTurn();}catch(err){showFatal(err);}});
+    document.getElementById('atkBtn').addEventListener('click',()=>{try{this.attackTurn();}catch(err){fatal(err);}});
   }
 
-  moveTurn(mx,my){
-    if(!this.p.hp)return;
-    const nx=this.p.x+mx,ny=this.p.y+my,foe=this.enemyAt(nx,ny);
-    if(foe)this.hit(foe);
-    else if(this.walk(nx,ny)&&!foe){
-      this.p.x=nx;this.p.y=ny;this.msg="移動";this.plog("移動");this.pickItem();
-    }else return;
-    this.enemyPhase();
-  }
+  /* ─── ターン：移動 ─── */
+  moveTurn(mx,my,dirName){
+    if(!this.p.hp) return;
 
-  attackTurn(){
-    if(!this.p.hp)return;
-    const tgt=this.en.find(e=>ADJ(e.x,e.y,this.p.x,this.p.y));
-    tgt?this.hit(tgt):(this.msg="空振り！",this.plog("空振り"));
-    this.enemyPhase();
-  }
+    const maxStep=this.p.dash?2:1;
+    let steps=0, moved=false;
 
-  hit(e){
-    if(Math.random()<MISS_RATE){this.msg="攻撃ミス！";this.plog("攻撃ミス");return;}
-    const dmg=RNG(3,6)+this.p.atkBonus;
-    e.hp-=dmg;this.msg=`攻撃！ -${dmg}`;this.plog(`敵${e.id} に ${dmg} DMG`);
-    if(e.hp<=0){this.en=this.en.filter(v=>v!==e);this.msg="敵撃破！";this.plog(`敵${e.id} 撃破`);}
-  }
-
-  pickItem(){
-    const i=this.itemIdx(this.p.x,this.p.y);if(i===-1)return;
-    const it=this.items[i];
-    if(it.type==="heal"){
-      const bef=this.p.hp;this.p.hp=Math.min(this.p.hp+10,20);
-      this.msg=`回復 +${this.p.hp-bef}`;this.plog(`回復 +${this.p.hp-bef}`);
-    }else{
-      this.p.atkBonus+=3;this.msg="攻撃力 +3";this.plog("攻撃+3");
+    while(steps<maxStep){
+      const nx=this.p.x+mx,ny=this.p.y+my;
+      const foe=this.enemyAt(nx,ny);
+      if(foe){
+        this.hitEnemy(foe);
+        moved=true;
+        break;
+      }else if(this.walk(nx,ny)){
+        this.p.x=nx;this.p.y=ny;moved=true;steps++;
+        this.checkItem();
+      }else break;
     }
-    this.items.splice(i,1);
+
+    if(moved){
+      this.msg=`プレイヤーは${dirName}に移動しました。`;
+      this.plog(this.msg,'n');
+      if(this.p.dash) this.p.dash=0;       // ダッシュ消費
+      this.enemyPhase();
+    }
   }
 
-  enemyPhase(){this.en=this.en.filter(e=>e.hp>0);this.en.forEach(e=>e.act(this));this.endTurn();}
+  /* ─── ターン：攻撃 ─── */
+  attackTurn(){
+    if(!this.p.hp) return;
+    const tgt=this.en.find(e=>ADJ(e.x,e.y,this.p.x,this.p.y));
+    if(!tgt){
+      this.msg='プレイヤーは空振りしました。';
+      this.plog(this.msg,'n');
+    }else{
+      this.hitEnemy(tgt);
+    }
+    this.enemyPhase();
+  }
+
+  /* ─── 与ダメ ─── */
+  hitEnemy(e){
+    if(Math.random()<MISS){
+      this.msg='プレイヤーの攻撃は外れました。';
+      this.plog(this.msg,'n');
+      return;
+    }
+    let dmg=RNG(3,6)+this.p.atkBonus;
+    const crit=Math.random()<CRIT;
+    if(crit) dmg*=2;
+    e.hp-=dmg;
+    this.msg=`プレイヤーは敵${e.id}に${dmg}のダメージを与えました。${crit?'(クリティカル)':''}`;
+    this.plog(this.msg,'ed');
+    if(e.hp<=0){
+      this.msg=`敵${e.id}を倒しました。`;
+      this.plog(this.msg,'ed');
+      this.en=this.en.filter(v=>v!==e);
+    }
+  }
+
+  /* ─── アイテム取得 ─── */
+  checkItem(){
+    const idx=this.itemIdx(this.p.x,this.p.y);if(idx===-1)return;
+    const it=this.items[idx];
+    if(it.type==='heal'){
+      const before=this.p.hp;this.p.hp=Math.min(this.p.hp+10,20);
+      const diff=this.p.hp-before;
+      this.msg=`プレイヤーは${diff}回復しました。`;
+      this.plog(this.msg,'heal');
+    }else if(it.type==='power'){
+      this.p.atkBonus+=3;
+      this.msg='プレイヤーの攻撃力が 3 上がりました。';
+      this.plog(this.msg,'stat');
+    }else if(it.type==='dash'){
+      this.p.dash=1;
+      this.msg='プレイヤーはダッシュ準備を整えました。次の移動で 2 マス進めます。';
+      this.plog(this.msg,'stat');
+    }
+    this.items.splice(idx,1);
+  }
+
+  /* ─── 敵フェーズ ─── */
+  enemyPhase(){
+    this.en=this.en.filter(e=>e.hp>0);
+    for(const e of this.en) e.act(this);
+    this.endTurn();
+  }
+
+  /* ─── ターン終了 ─── */
   endTurn(){
-    if(this.p.hp<=0){this.msg="Game Over";this.plog("倒れた");this.cvs.style.filter="grayscale(1)";}
-    this.turn++;this.render();
+    if(this.p.hp<=0){
+      this.msg='プレイヤーは倒れました…。';
+      this.plog(this.msg,'pd');
+      this.cv.style.filter='grayscale(1)';
+    }
+    this.turn++;
+    this.draw();this.ui();
   }
 
-  /* --- 描画 & UI --- */
-  render(){this.ui();this.draw();}
+  /* ─── 描画 ─── */
   draw(){
     const g=this.ctx;
-    g.clearRect(0,0,this.cvs.width,this.cvs.height);
+    g.clearRect(0,0,this.cv.width,this.cv.height);
     for(let y=0;y<H;y++)for(let x=0;x<W;x++){
       g.fillStyle=this.map[y][x]===FLOOR?this.patFloor:this.patWall;
       g.fillRect(x*TILE,y*TILE,TILE,TILE);
     }
-    this.items.forEach(i=>i.draw(g));this.en.forEach(e=>e.draw(g));this.p.draw(g);
+    this.items.forEach(i=>i.draw(g));
+    this.en.forEach(e=>e.draw(g));
+    this.p.draw(g);
   }
 }
 
-/* --- 起動（try/catch で安全に） --- */
-window.addEventListener("load",()=>{
+/* ─── 起動 ─── */
+window.addEventListener('load',()=>{
   try{
-    const cvs=document.getElementById("gameCanvas");
+    const cv=document.getElementById('gameCanvas');
     const dpr=window.devicePixelRatio||1;
-    cvs.width=W*TILE*dpr;cvs.height=H*TILE*dpr;cvs.getContext("2d").scale(dpr,dpr);
-    new Game(cvs);
-  }catch(err){showFatal(err);}
+    cv.width=W*TILE*dpr;cv.height=H*TILE*dpr;cv.getContext('2d').scale(dpr,dpr);
+    new Game(cv);
+  }catch(err){fatal(err);}
 });
